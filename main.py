@@ -1,3 +1,4 @@
+import os
 from model import *
 from strategies import *
 import torch
@@ -6,12 +7,12 @@ from torch.utils.data import DataLoader, Subset
 def get_SGD_optimizer(model, lr, weight_decay=1e-5, momentum=0.9):
     return torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum)
 
-def get_mean_std(dataloader):
+def get_mean_std(data):
 
     total_mean = torch.zeros(1)
     total_std = torch.zeros(1)
     total_samples = 0
-    for images, _  in dataloader:
+    for images, _  in data:
         num_samples = images.shape[0]
         total_samples += num_samples
         total_mean += images.mean() * num_samples
@@ -28,18 +29,41 @@ def load_mnist(batch_size = 64, normalize=True):
     from torchvision.transforms import ToTensor, Normalize, Compose
 
 
+    path_to_mean_std = "data/mnist_mean_std.pt"
+    if normalize and os.path.exists(path_to_mean_std):
+        loaded_tensors = torch.load(path_to_mean_std)
+        train_mean = loaded_tensors['train_mean']
+        train_std = loaded_tensors['train_std']
+        test_mean = loaded_tensors['test_mean']
+        test_std = loaded_tensors['test_std']
+
+        transform = Compose([ToTensor(), Normalize(train_mean, train_std)])
+        train_set = FashionMNIST('./data', train=True, download=True, transform=transform)
+
+        transform = Compose([ToTensor(), Normalize(test_mean, test_std)])
+        test_set = FashionMNIST('./data', train=False, download=True, transform=transform)
+
+        return train_set, test_set
+    
     transform = ToTensor()
     train_set = FashionMNIST('./data', train=True, download=True, transform=transform)
     test_set = FashionMNIST('./data', train=False, download=True, transform=transform)
 
     # Normalize
-    train_mean, train_std = get_mean_std(train_set)
-    test_mean, test_std = get_mean_std(test_set)
-    transform = Compose([ToTensor(), Normalize(train_mean, train_std)])
-    train_set = FashionMNIST('./data', train=True, download=True, transform=transform)
+    if normalize:
+        train_mean, train_std = get_mean_std(train_set)
+        test_mean, test_std = get_mean_std(test_set)
+        
+        torch.save({'train_mean': train_mean,
+                    'train_std': train_std,
+                    'test_mean': test_mean,
+                    'test_std': test_std}, path_to_mean_std)
 
-    transform = Compose([ToTensor(), Normalize(test_mean, test_std)])
-    train_set = FashionMNIST('./data', train=False, download=True, transform=transform)
+        transform = Compose([ToTensor(), Normalize(train_mean, train_std)])
+        train_set = FashionMNIST('./data', train=True, download=True, transform=transform)
+
+        transform = Compose([ToTensor(), Normalize(test_mean, test_std)])
+        test_set = FashionMNIST('./data', train=False, download=True, transform=transform)
     
     return train_set, test_set
 
