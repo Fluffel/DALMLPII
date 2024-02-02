@@ -1,27 +1,12 @@
 import os
+import torch
+from torch.utils.data import Subset
+
 from model import *
 from strategies import *
-import torch
-from torch.utils.data import DataLoader, Subset
+from utils import *
 
-def get_SGD_optimizer(model, lr, weight_decay=1e-5, momentum=0.9):
-    return torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum)
-
-def get_mean_std(data):
-
-    total_mean = torch.zeros(1)
-    total_std = torch.zeros(1)
-    total_samples = 0
-    for images, _  in data:
-        num_samples = images.shape[0]
-        total_samples += num_samples
-        total_mean += images.mean() * num_samples
-        total_std += images.std() * num_samples
-
-    mean = total_mean / total_samples
-    std = total_std / total_samples
-    return mean, std
-
+import timeit
 
 
 def load_mnist(batch_size = 64, normalize=True):
@@ -67,25 +52,18 @@ def load_mnist(batch_size = 64, normalize=True):
     
     return train_set, test_set
 
-def get_data_loader(data_set, batch_size=32):
-    return DataLoader(data_set, batch_size=batch_size, shuffle=True)
 
 
-def train_step(model, loader, optimizer, loss_function, device):
-    model.train()
-    for x, y in loader:
-        x, y = x.to(device), y.to(device)
-        preds = model(x)
-        loss = loss_function(preds, y)
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
 
-def train_model(model_path, train_set, device, lr=1e-3, epochs=200, early_stop=False): #TODO: early stop?
+
+def train_model(model_path, train_set, device, lr=1e-3, epochs=200, early_stop=False):
     model = LeNet().to(device)
     model.load_state_dict(torch.load(model_path))
+    model.train()
+
     train_loader = get_data_loader(train_set)
     optimizer = get_SGD_optimizer(model, lr)
+    # optimizer = get_adam_optimizer(model, lr)
     loss_function = nn.CrossEntropyLoss()
 
     for _ in range(epochs):
@@ -93,27 +71,12 @@ def train_model(model_path, train_set, device, lr=1e-3, epochs=200, early_stop=F
 
     return model
 
-def test_model(model, test_set, device):
-    model.eval()
-    cum_accuracy = 0
-    total_loss = 0
 
-    loss_function = nn.CrossEntropyLoss()
-    test_loader = get_data_loader(test_set)
 
-    with torch.no_grad():
-        for x, y in test_loader:
-            x, y = x.to(device), y.to(device)
-            output = model(x)
-            loss = loss_function(output, y)
-            total_loss += loss.item()  #LOOK WHAT THIS DOES
-            _, predicted = output.max(dim=1)
-            cum_accuracy += sum(predicted.eq(y)).item()
-    return total_loss/len(test_set), cum_accuracy/len(test_set)
-
-def main(initial_size, seed, sampling_batch_size=10, batch_size=32, iterations=20, no_gpu=True):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+def main(initial_size, seed, filename, strat='dal', sampling_batch_size=100, iterations=1, sub_iterations_dal=4, discriminator_epochs=550, no_gpu=True):
+    if seed:
+        np.random.seed(seed)
+        torch.manual_seed(seed)
 
     use_gpu = not no_gpu and torch.cuda.is_available()
     if use_gpu:
@@ -122,46 +85,60 @@ def main(initial_size, seed, sampling_batch_size=10, batch_size=32, iterations=2
         device = torch.device("cpu")
 
     print("Initialize model...")
-    model_path = 'initial_model'
+    model_path = 'data/initial_model'
     model = LeNet().to(device)
     torch.save(model.state_dict(), model_path)
     
     print("Load Dataset...")
     train_set, test_set = load_mnist()
-    # train_loader = DataLoader(train_set, batch_size=batch_size)
-    # test_loader = DataLoader(test_set, batch_size=batch_size)
+    test_loader = get_data_loader(test_set)
     labeled = np.random.permutation(len(train_set))[:initial_size]
+
+    if strat == 'random':
+        strategy = RandomSampling(sampling_batch_size)
+    elif strat == 'dal':
+        strategy = DiscrimativeRepresentationSampling(sampling_batch_size, None, num_sub_batches=sub_iterations_dal, discriminator_epochs=discriminator_epochs, device=device)
 
     print("-----------Start Iterations-----------")
     accuracies = []
     losses = []
-    current_iteration = 1
-
-    strategy = RandomSampling(sampling_batch_size)
+    number_labeled = []
+    current_iteration = 0
+    print("Train LeNet...")
     current_model = train_model(model_path, Subset(train_set, labeled), device)
-    loss, acc = test_model(current_model, test_set, device)
+    loss, acc = eval_model(current_model, test_loader, nn.CrossEntropyLoss(), device)
     losses.append(loss)
     accuracies.append(acc)
+    number_labeled.append(len(labeled))
     print("-----------Iteration "+ str(current_iteration) + "-----------")
     print("Labeled sample size: " + str(len(labeled)))
     print("Accuracy: " + str(acc))
     print("Loss: " + str(loss))
     for i in range(iterations):
-
+        print("Update model...")
+        strategy.update_model(current_model)
         labeled = strategy.next_sample(train_set, labeled)
         labeled_dataset = Subset(train_set, labeled)
+
+        print("Train LeNet...")
         current_model = train_model(model_path, labeled_dataset, device)
-        loss, acc = test_model(current_model, test_set, device)
+        loss, acc = eval_model(current_model, test_loader, nn.CrossEntropyLoss(), device)
         losses.append(loss)
         accuracies.append(acc)
+        number_labeled.append(len(labeled))
         current_iteration += 1
         print("-----------Iteration "+ str(current_iteration) + "-----------")
         print("Labeled sample size: " + str(len(labeled)))
         print("Accuracy: " + str(acc))
         print("Loss: " + str(loss))
+    
+    save_result({"accuracy": accuracies, "losses": losses, "number labeled": number_labeled}, filename)
 
 
 if __name__ == '__main__':
-    main(50, 1)
+    start = timeit.timeit()
+    main(100, None, "data/acc_loss_rand_sgd.json", strat='random', sampling_batch_size=100, iterations=20)
+    end = timeit.timeit()
+    print("total elapsed time: {}".format(end - start))
 
     

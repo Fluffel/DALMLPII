@@ -1,4 +1,57 @@
+import torch
 import torch.nn as nn
+
+class DiscriminativeMultilayerPerceptron(nn.Module):
+    def __init__(self, input_size, hidden_size=256):
+        super(DiscriminativeMultilayerPerceptron, self).__init__()
+        
+        self.linear1 = nn.Linear(in_features=input_size, out_features=hidden_size)
+        self.linear2 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        self.linear3 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        # self.linear4 = nn.Linear(in_features=hidden_size, out_features=hidden_size)
+        self.linear5 = nn.Linear(in_features=hidden_size, out_features=2)
+
+    def forward(self, x):
+        # x = x.flatten()
+        x = self.linear1(x)
+        x = torch.relu(x)
+
+        x = self.linear2(x)
+        x = torch.relu(x)
+
+        x = self.linear3(x)
+        x = torch.relu(x)
+
+        # x = self.linear4(x)
+        # x = torch.relu(x)
+
+        x = self.linear5(x)
+        return x
+
+class LeNetEmbeddingModel(nn.Module):
+    def __init__(self, le_net_base):
+        super(LeNetEmbeddingModel, self).__init__()
+        self.conv1 = le_net_base.conv1
+        self.conv2 = le_net_base.conv2
+        
+        self.linear1 = le_net_base.linear1
+        self.linear2 = le_net_base.linear2
+        
+    def forward(self, x):
+        x = self.conv1(x)
+        x = torch.relu(x)
+        x = torch.max_pool2d(x, kernel_size=2)
+        
+        x = self.conv2(x)
+        x = torch.relu(x)
+        x = torch.max_pool2d(x, kernel_size=2)
+        
+        x = x.flatten(start_dim=1, end_dim=-1)
+        x = self.linear1(x)
+        x = torch.relu(x)
+        x = self.linear2(x)
+
+        return x
 
 class LeNet(nn.Module):
     def __init__(self):
@@ -13,19 +66,21 @@ class LeNet(nn.Module):
         self.linear2 = nn.Linear(in_features=120, out_features=84)
         self.linear3 = nn.Linear(in_features=84, out_features=10)
 
+
     def forward(self, x):
         x = self.conv1(x)
-        x = nn.functional.relu(x)
-        x = nn.functional.max_pool2d(x, kernel_size=2)
-        # print(x.shape)
+        x = torch.relu(x)
+        x = torch.max_pool2d(x, kernel_size=2)
+
         x = self.conv2(x)
-        x = nn.functional.relu(x)
-        x = nn.functional.max_pool2d(x, kernel_size=2)
-        # print(x.shape)
+        x = torch.relu(x)
+        x = torch.max_pool2d(x, kernel_size=2)
+
         x = x.flatten(start_dim=1, end_dim=-1)
         x = self.linear1(x)
-        x = nn.functional.relu(x)
+        x = torch.relu(x)
         x = self.linear2(x)
-        x = nn.functional.relu(x)
+        x = torch.relu(x)
         x = self.linear3(x)
+        # x = torch.softmax(x, dim=1)
         return x
