@@ -7,25 +7,31 @@ import torch
 import torch.nn
 from torch.utils.data import DataLoader, Dataset
 from utils import *
-
+import wandb
 
 
 class SamplingStrategy():
-    def __init__(self, batch_size):
+    def __init__(self, batch_size, iteration=0):
         self.batch_size = batch_size
+        self.current_iteration = iteration
         # self.seed = seed
     def update_model(self, model) -> None:
         raise NotImplementedError()
 
+    def get_next_batch(self, sample_set, labeled_idc):
+        raise NotImplementedError()
+    def next_iteration(self):
+        self.current_iteration += 1
 
 
 class RandomSampling(SamplingStrategy):
     def __init__(self, batch_size):
         super().__init__(batch_size)
-    def next_sample(self, sample_set, labeled_idc):
+    def get_next_batch(self, sample_set, labeled_idc):
         # np.random.seed(self.seed)
         unlabeled_idc = get_unlabeled_idc(len(sample_set), labeled_idc)
         return np.hstack((np.random.choice(unlabeled_idc, self.batch_size), labeled_idc))
+    
     def update_model(self, model) -> None:
         return None
 
@@ -55,6 +61,8 @@ class DiscrimativeRepresentationSampling(SamplingStrategy):
         self.discriminator_epochs = discriminator_epochs
         self.device = device
         self.sub_batch_size = int(math.ceil(batch_size / num_sub_batches))
+        self.current_subiteration = 0
+        self.num_sub_batches = num_sub_batches 
 
 
     def get_embeddings(self, data):
@@ -82,7 +90,7 @@ class DiscrimativeRepresentationSampling(SamplingStrategy):
         loader = get_data_loader(BinaryData(train_x, torch.tensor(train_y, dtype=torch.long, device=self.device)))
         # optimizer = get_SGD_optimizer(model, lr=0.0001, momentum=0.1)
         optimizer = get_adam_optimizer(model, lr=0.0001)
-
+        early_stopper = EarlyStop(40, 0.0001)
         
         weights = torch.tensor([train_x.shape[0] / (len(unlabeled_idc)), train_x.shape[0] / (len(labeled_idc))], device=self.device)
         loss_function = nn.CrossEntropyLoss(weight=weights) 
@@ -93,17 +101,29 @@ class DiscrimativeRepresentationSampling(SamplingStrategy):
             train_step(model, loader, optimizer, loss_function, self.device)
 
             l, acc = eval_model(model, loader, loss_function, self.device)
-            if print_count % 10 == 0: #print every tenth iteration
+            # step_idx = (self.current_iteration - 1) * self.num_sub_batches + self.current_subiteration
+            # wandb.log({"discriminator/accuracy": acc, 
+            #            " discriminator/loss": l}, step=step_idx, name="Iter {}-{}".format(self.current_iteration, self.current_subiteration))
+            # wandb.log({"discriminator/accuracy {}-{}".format(self.current_iteration, self.current_subiteration): acc, 
+            #            "discriminator/loss {}-{}".format(self.current_iteration, self.current_subiteration): l}, step=e)
+            # prefix = "discriminator/{}-{}".format(self.current_iteration, self.current_subiteration)
+            # wandb.define_metric(prefix)
+            # wandb.define_metric("discriminator/*", step_metric=prefix)
+            # wandb.log({prefix + "/accuracy": acc, 
+            #            prefix + "/loss": l})
+            if print_count % 40 == 0: #print every fourtieth iteration
                 print("---- Epoch " + str(e) + " ----")
                 print("Acc: {}".format(acc))
                 print("Loss: {}".format(l))
+            if early_stopper.early_stop(l):
+                break
             print_count += 1
         return model
 
 
 
 
-    def next_sample(self, sample_set, labeled_idc):
+    def get_next_batch(self, sample_set, labeled_idc):
         def get_unlabeled_idc_with_ratio(set_size, labeled_idc, ratio):
             unlabeled_idc = get_unlabeled_idc(set_size, labeled_idc)
             if len(labeled_idc) * ratio < len(unlabeled_idc):
@@ -121,10 +141,10 @@ class DiscrimativeRepresentationSampling(SamplingStrategy):
         embeddings = self.get_embeddings(sample_loader)
 
         sample_count = 0
-        count = 1
+        self.current_subiteration = 0
         print("--- Train Discriminator ---")
         while sample_count < self.batch_size:
-            print("Subbatch {}".format(count))
+            print("Subbatch {}".format(self.current_subiteration))
             unlabeled_idc = get_unlabeled_idc_with_ratio(len(sample_set), labeled_idc, unlabeled_labeled_max_ratio)
             sub_batch_size = min(self.sub_batch_size, self.batch_size - sample_count)
             discriminator = self.train_discriminator(embeddings, unlabeled_idc, labeled_idc)
@@ -136,7 +156,7 @@ class DiscrimativeRepresentationSampling(SamplingStrategy):
                 labeled_idc = np.hstack((labeled_idc, to_labeled_idc))
                 sample_count += sub_batch_size
                 
-            count += 1
+            self.current_subiteration += 1
             del discriminator
             gc.collect()
 

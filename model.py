@@ -53,6 +53,25 @@ class LeNetEmbeddingModel(nn.Module):
 
         return x
 
+
+class EarlyStop():
+    def __init__(self, patience, epsilon):
+        self.patience = patience
+        self.epsilon = epsilon
+        self.count = 0
+        self.min_loss = float('inf')
+
+    def early_stop(self, loss):
+        if loss < self.min_loss:
+            self.min_loss = loss
+            self.count = 0
+        elif loss > (self.min_loss + self.epsilon):
+            self.count += 1
+            if self.count > self.patience:
+                print("STOPPED EARLY")
+                return True
+        return False
+
 class LeNet(nn.Module):
     def __init__(self):
         super(LeNet, self).__init__()

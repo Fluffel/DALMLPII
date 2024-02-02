@@ -28,16 +28,15 @@ def train_step(model, loader, optimizer, loss_function, device):
         optimizer.zero_grad()
 
 
-def eval_model(model, test_loader, loss_function, device):
+def eval_model(model, val_loader, loss_function, device):
     model.eval()
+
     cum_accuracy = 0
     total_loss = 0
     set_size = 0
-    # loss_function = nn.CrossEntropyLoss()
-    # test_loader = get_data_loader(test_set)
 
     with torch.no_grad():
-        for x, y in test_loader:
+        for x, y in val_loader:
             set_size += x.shape[0]
             x, y = x.to(device), y.to(device)
             output = model(x)
