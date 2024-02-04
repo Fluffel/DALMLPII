@@ -67,7 +67,7 @@ class DiscrimativeRepresentationSampling(SamplingStrategy):
 
     def get_embeddings(self, data):
         self.model.eval()
-        embeddings = torch.Tensor()
+        embeddings = torch.Tensor().to(self.device)
         with torch.no_grad():
             for x, _ in data:
                 x = x.to(self.device)
@@ -95,29 +95,12 @@ class DiscrimativeRepresentationSampling(SamplingStrategy):
         weights = torch.tensor([train_x.shape[0] / (len(unlabeled_idc)), train_x.shape[0] / (len(labeled_idc))], device=self.device)
         loss_function = nn.CrossEntropyLoss(weight=weights) 
 
-        print_count = 0 
         print("---------- Train Discriminator ---------- ")
         for e in range(self.discriminator_epochs):
             train_step(model, loader, optimizer, loss_function, self.device)
+            # l, acc = eval_model(model, loader, loss_function, self.device)
+            # wandb.log({"discriminator/accuracy": acc, "discriminator/loss": l})
 
-            l, acc = eval_model(model, loader, loss_function, self.device)
-            # step_idx = (self.current_iteration - 1) * self.num_sub_batches + self.current_subiteration
-            # wandb.log({"discriminator/accuracy": acc, 
-            #            " discriminator/loss": l}, step=step_idx, name="Iter {}-{}".format(self.current_iteration, self.current_subiteration))
-            # wandb.log({"discriminator/accuracy {}-{}".format(self.current_iteration, self.current_subiteration): acc, 
-            #            "discriminator/loss {}-{}".format(self.current_iteration, self.current_subiteration): l}, step=e)
-            # prefix = "discriminator/{}-{}".format(self.current_iteration, self.current_subiteration)
-            # wandb.define_metric(prefix)
-            # wandb.define_metric("discriminator/*", step_metric=prefix)
-            # wandb.log({prefix + "/accuracy": acc, 
-            #            prefix + "/loss": l})
-            if print_count % 40 == 0: #print every fourtieth iteration
-                print("---- Epoch " + str(e) + " ----")
-                print("Acc: {}".format(acc))
-                print("Loss: {}".format(l))
-            if early_stopper.early_stop(l):
-                break
-            print_count += 1
         return model
 
 

@@ -67,36 +67,27 @@ def train_model(model_path, train_set, validation_set, iteration, device, lr=1e-
     optimizer = get_adam_optimizer(model, lr)
     loss_function = nn.CrossEntropyLoss()
     if early_stop:
-        early_stopper = EarlyStop(5, 0.0001)
+        early_stopper = EarlyStop(15, 0.0001)
 
     epoch_count = 0
     # print("Eval...")
     # loss, acc = eval_model(model, validation_loader, loss_function, device)
-    # prefix = f"validation/iteration-{iteration}/"
-    # config = {"epochs": epochs, "learning_rate":lr}
-    # train = wandb.init(project="DiscriminativeActiveLearning", name=f"train{iteration}", config=config)
-    # wandb.define_metric(prefix)
-    # wandb.define_metric(prefix + "/*", step_metric=prefix)
-    # wandb.log({prefix + "/accuracy": acc, prefix + "/loss": loss})
+    # wandb.log({"validation/accuracy": acc, validation"/loss": loss})
     for e in range(epochs):
         # print("Train...")
         train_step(model, train_loader, optimizer, loss_function, device)
         # print("Eval...")
+        # wandb.log({"validation/accuracy": acc, "validation/loss": loss})
         if early_stop:
             loss, acc = eval_model(model, validation_loader, loss_function, device)
             if early_stopper.early_stop(loss):
-            # wandb.log({prefix + "/accuracy": acc, prefix + "/loss": loss})
-            # if epoch_count % 10 == 0:
-            #     print("--- epoch{} ---".format(e))
-            #     print("LeNet acc: {}".format(acc))
-            #     print("LeNet loss: {}".format(loss))
                 break
         epoch_count += 1
     return model
 
 
 
-def main(initial_size, strat, sampling_batch_size=100, iterations=1, sub_iterations_dal=4, epochs=200, discriminator_epochs=550, lr=1e-3, seed=None, no_gpu=True):
+def main(initial_size, strat, sampling_batch_size=100, iterations=1, sub_iterations_dal=4, epochs=200, discriminator_epochs=550, lr=1e-3, train_size=100, seed=None, no_gpu=True):
     wandb.login()
     if strat == "random":
         config = {"initial_size": initial_size, "sampling_batch_size": sampling_batch_size, "iterations":iterations, "epochs": epochs, "learning_rate":lr, "seed": None}
@@ -106,7 +97,7 @@ def main(initial_size, strat, sampling_batch_size=100, iterations=1, sub_iterati
         wandb.init(project="DiscriminativeActiveLearning", name="DiscriminativeActiveLearning", config=config)
     else:
         config = {"epochs": epochs, "learning_rate":lr, "seed": None}
-        wandb.init(project="DiscriminativeActiveLearning", name="LeNet Full Set", config=config)
+        wandb.init(project="DiscriminativeActiveLearning", name="LeNetPlain", config=config)
 
 
     if seed:
@@ -138,7 +129,10 @@ def main(initial_size, strat, sampling_batch_size=100, iterations=1, sub_iterati
     elif strat == 'dal':
         strategy = DiscrimativeRepresentationSampling(sampling_batch_size, None, num_sub_batches=sub_iterations_dal, discriminator_epochs=discriminator_epochs, device=device)
     else:
-        current_model = train_model(model_path, train_set, validation_set, "Full Dataset", device, lr=lr, epochs=epochs)
+        # If no strategy is selected, the model is just trained on a custom sized train set, reporting validation scores
+
+        small_train_set, small_validation_set, _ = random_split(train_set, [train_size, int(0.5*train_size), int(len(train_set) - (1.5 * train_size))])
+        current_model = train_model(model_path, small_train_set, small_validation_set, "Full Dataset", device, lr=lr, epochs=epochs, early_stop=True)
         loss, acc = eval_model(current_model, test_loader, nn.CrossEntropyLoss(), device)
         print("Test loss: {}".format(loss))
         print("Test acc: {}".format(acc))
@@ -150,7 +144,6 @@ def main(initial_size, strat, sampling_batch_size=100, iterations=1, sub_iterati
     accuracies = []
     losses = []
     number_labeled = []
-    # current_iteration = 0
 
     print("Train LeNet...")
     current_model = train_model(model_path, Subset(train_set, labeled), validation_set, 0, device, lr=lr, epochs=epochs)
@@ -159,8 +152,6 @@ def main(initial_size, strat, sampling_batch_size=100, iterations=1, sub_iterati
     accuracies.append(acc)
     number_labeled.append(len(labeled))
 
-    # wandb.define_metric("test")
-    # wandb.define_metric("test/*", step_metric="test")
     wandb.log({"test/acc": acc, "test/loss": loss})
     print("-----------Iteration "+ str(0) + "-----------")
     print("Labeled sample size: " + str(len(labeled)))
@@ -189,12 +180,9 @@ def main(initial_size, strat, sampling_batch_size=100, iterations=1, sub_iterati
         print("Accuracy: " + str(acc))
         print("Loss: " + str(loss))
     
-        # current_iteration += 1
         strategy.next_iteration()
-    # save_result({"accuracy": accuracies, "losses": losses, "number labeled": number_labeled}, filename)
 
 
 if __name__ == '__main__':
-    main(initial_size=50, strat='dal', sampling_batch_size=10, iterations=95, sub_iterations_dal=1, epochs=170, discriminator_epochs=700, lr=1e-4, seed=None, no_gpu=True)
-
+    main(initial_size=100, strat='dal', sampling_batch_size=100, iterations=20, sub_iterations_dal=4, epochs=200, discriminator_epochs=700, lr=1e-4, seed=None, no_gpu=True)
     

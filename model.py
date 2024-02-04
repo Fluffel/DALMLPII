@@ -12,7 +12,6 @@ class DiscriminativeMultilayerPerceptron(nn.Module):
         self.linear5 = nn.Linear(in_features=hidden_size, out_features=2)
 
     def forward(self, x):
-        # x = x.flatten()
         x = self.linear1(x)
         x = torch.relu(x)
 
@@ -101,5 +100,5 @@ class LeNet(nn.Module):
         x = self.linear2(x)
         x = torch.relu(x)
         x = self.linear3(x)
-        # x = torch.softmax(x, dim=1)
+        
         return x
